@@ -1,0 +1,11 @@
+.git
+.gradle
+**/.gradle
+.idea
+.codex
+.agents
+.env
+.env.*
+**/build
+**/src/test
+*.log

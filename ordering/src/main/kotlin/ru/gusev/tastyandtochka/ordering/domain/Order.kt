@@ -9,7 +9,7 @@ class Order private constructor(
     items: List<OrderItem>,
     val createdAt: Instant,
     status: OrderStatus,
-    val version: Long,
+    version: Long,
 ) {
     constructor(id: UUID, items: List<OrderItem>, createdAt: Instant) :
         this(id, items, createdAt, OrderStatus.CREATED, 0)
@@ -18,6 +18,9 @@ class Order private constructor(
     val items: List<OrderItem> = Collections.unmodifiableList(items.toList())
 
     var status: OrderStatus = status
+        private set
+
+    var version: Long = version
         private set
 
     init {
@@ -33,10 +36,12 @@ class Order private constructor(
     }
 
     fun changeStatus(newStatus: OrderStatus) {
-        check(status.canTransitionTo(newStatus)) {
-            "Cannot change order status from $status to $newStatus"
+        if (!status.canTransitionTo(newStatus)) {
+            throw InvalidOrderStatusTransitionException(status, newStatus)
         }
+        val nextVersion = Math.incrementExact(version)
         status = newStatus
+        version = nextVersion
     }
 
     companion object {

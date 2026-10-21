@@ -6,4 +6,5 @@ import java.util.UUID
 internal interface OrderRepository {
     fun save(order: Order)
     fun findById(id: UUID): Order?
+    fun updateStatus(order: Order, expectedVersion: Long): Boolean
 }

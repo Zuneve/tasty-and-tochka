@@ -1,8 +1,15 @@
 package ru.gusev.tastyandtochka.ordering.application
 
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import ru.gusev.tastyandtochka.catalog.api.CatalogQuery
+import ru.gusev.tastyandtochka.ordering.api.InvalidOrderException
+import ru.gusev.tastyandtochka.ordering.api.OrderAmountTooLargeException
+import ru.gusev.tastyandtochka.ordering.api.OrderNotFoundException
+import ru.gusev.tastyandtochka.ordering.api.OrderVersionConflictException
+import ru.gusev.tastyandtochka.ordering.api.ProductsNotFoundException
+import ru.gusev.tastyandtochka.ordering.api.ProductsUnavailableException
 import ru.gusev.tastyandtochka.ordering.domain.Order
 import ru.gusev.tastyandtochka.ordering.domain.OrderItem
 import java.time.Instant
@@ -13,6 +20,7 @@ import java.util.UUID
 internal class OrderService(
     private val catalog: CatalogQuery,
     private val repository: OrderRepository,
+    private val events: ApplicationEventPublisher,
 ) {
     @Transactional
     fun create(command: CreateOrderCommand): Order {
@@ -51,9 +59,25 @@ internal class OrderService(
         }
 
         repository.save(order)
+        events.publishEvent(OrderCreatedEvent(order.id, order.items.size, order.totalPriceInKopecks))
         return order
     }
 
     @Transactional(readOnly = true)
     fun get(id: UUID): Order = repository.findById(id) ?: throw OrderNotFoundException(id)
+
+    @Transactional
+    fun changeStatus(id: UUID, command: ChangeOrderStatusCommand): Order {
+        if (command.expectedVersion < 0) throw InvalidOrderException("Order version must not be negative")
+
+        val order = repository.findById(id) ?: throw OrderNotFoundException(id)
+        if (order.version != command.expectedVersion) throw OrderVersionConflictException(id)
+
+        val previousStatus = order.status
+        order.changeStatus(command.status)
+        if (!repository.updateStatus(order, command.expectedVersion)) throw OrderVersionConflictException(id)
+        events.publishEvent(OrderStatusChangedEvent(order.id, previousStatus, order.status, order.version))
+
+        return order
+    }
 }

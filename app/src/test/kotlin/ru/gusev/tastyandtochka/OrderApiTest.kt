@@ -143,6 +143,20 @@ class OrderApiTest {
         assertEquals(itemsBefore, count("order_items"))
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["text/plain", "application/xml", "application/octet-stream"])
+    fun `rejects unsupported content types without creating an order`(contentType: String) {
+        val ordersBefore = count("orders")
+        val itemsBefore = count("order_items")
+
+        val response = post(defaultRequest(), contentType)
+
+        assertEquals("UNSUPPORTED_MEDIA_TYPE", body(response, 415)["code"].asString())
+        assertTrue(response.headers().firstValue("Content-Type").orElse("").startsWith("application/json"))
+        assertEquals(ordersBefore, count("orders"))
+        assertEquals(itemsBefore, count("order_items"))
+    }
+
     @Test
     fun `rejects duplicate products`() {
         val ordersBefore = count("orders")
@@ -239,9 +253,9 @@ class OrderApiTest {
     private fun defaultRequest() =
         """{"items":[{"productId":"$FRIES_ID","quantity":1},{"productId":"$BURGER_ID","quantity":2}]}"""
 
-    private fun post(body: String): HttpResponse<String> = send(
+    private fun post(body: String, contentType: String = "application/json"): HttpResponse<String> = send(
         HttpRequest.newBuilder(uri("/api/v1/orders"))
-            .header("Content-Type", "application/json")
+            .header("Content-Type", contentType)
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build(),
     )

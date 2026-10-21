@@ -79,6 +79,17 @@ internal class PostgresOrderRepository(private val jdbc: JdbcClient) : OrderRepo
         return order
     }
 
+    override fun updateStatus(order: Order, expectedVersion: Long): Boolean = jdbc.sql(
+        """
+        UPDATE orders SET status = :status, version = version + 1
+        WHERE id = :id AND version = :expectedVersion
+        """.trimIndent(),
+    )
+        .param("status", order.status.name)
+        .param("id", order.id)
+        .param("expectedVersion", expectedVersion)
+        .update() == 1
+
     private data class OrderHeader(
         val id: UUID,
         val status: OrderStatus,

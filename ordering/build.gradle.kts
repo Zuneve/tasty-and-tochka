@@ -9,6 +9,7 @@ dependencies {
     implementation("org.springframework:spring-jdbc")
     implementation("org.springframework:spring-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-validation")
+    compileOnly("jakarta.servlet:jakarta.servlet-api")
 
     testImplementation(platform("org.junit:junit-bom:6.0.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")

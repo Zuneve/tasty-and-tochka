@@ -30,6 +30,17 @@ class OrderTest {
     @Test
     fun `new order starts with CREATED status`() {
         assertEquals(OrderStatus.CREATED, order().status)
+        assertEquals(0L, order().version)
+    }
+
+    @Test
+    fun `increments a restored version when status changes`() {
+        val order = Order.restore(UUID.randomUUID(), listOf(item()), Instant.now(), OrderStatus.READY, 7)
+
+        order.changeStatus(OrderStatus.COMPLETED)
+
+        assertEquals(OrderStatus.COMPLETED, order.status)
+        assertEquals(8L, order.version)
     }
 
     @Test
@@ -107,12 +118,15 @@ class OrderTest {
         for (from in OrderStatus.entries) {
             for (to in OrderStatus.entries) {
                 val order = orderWithStatus(from)
+                val version = order.version
                 if ((from to to) in allowedTransitions) {
                     order.changeStatus(to)
                     assertEquals(to, order.status)
+                    assertEquals(version + 1, order.version)
                 } else {
-                    assertThrows(IllegalStateException::class.java, { order.changeStatus(to) }, "$from -> $to")
+                    assertThrows(InvalidOrderStatusTransitionException::class.java, { order.changeStatus(to) }, "$from -> $to")
                     assertEquals(from, order.status)
+                    assertEquals(version, order.version)
                 }
             }
         }
