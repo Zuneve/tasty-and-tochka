@@ -1,0 +1,12 @@
+.git
+.gradle
+**/.gradle
+.kotlin
+.idea
+.codex
+.agents
+.env
+.env.*
+**/build
+**/src/test
+*.log

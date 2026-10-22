@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - include:
+      file: db/changelog/catalog/001-create-catalog.sql
+  - include:
+      file: db/changelog/ordering/001-create-orders.sql
+  - include:
+      file: db/changelog/catalog/002-seed-menu.sql
+  - include:
+      file: db/changelog/ordering/002-remove-order-version.sql
