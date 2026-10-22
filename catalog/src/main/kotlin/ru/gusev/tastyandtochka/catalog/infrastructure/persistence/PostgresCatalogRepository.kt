@@ -1,53 +1,75 @@
 package ru.gusev.tastyandtochka.catalog.infrastructure.persistence
 
-import org.springframework.jdbc.core.simple.JdbcClient
+import org.springframework.data.annotation.Id
+import org.springframework.data.domain.Sort
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
+import org.springframework.data.relational.core.mapping.Table
+import org.springframework.data.relational.core.query.Criteria
+import org.springframework.data.relational.core.query.Query
 import org.springframework.stereotype.Repository
 import ru.gusev.tastyandtochka.catalog.application.CatalogRepository
 import ru.gusev.tastyandtochka.catalog.domain.Category
 import ru.gusev.tastyandtochka.catalog.domain.Product
-import java.sql.ResultSet
+import reactor.core.publisher.Mono
 import java.util.UUID
 
 @Repository
-internal class PostgresCatalogRepository(private val jdbc: JdbcClient) : CatalogRepository {
-    override fun findCategories(): List<Category> = jdbc
-        .sql("SELECT id, name FROM categories ORDER BY name, id")
-        .query { row, _ ->
-            Category(
-                id = row.getObject("id", UUID::class.java),
-                name = row.getString("name"),
-            )
+class PostgresCatalogRepository(private val template: R2dbcEntityTemplate) : CatalogRepository {
+    override fun findCategories(): Mono<List<Category>> {
+        val query = Query.empty().sort(Sort.by("name", "id"))
+        return template.select(CategoryRow::class.java).matching(query).all().collectList().map { rows ->
+            val categories = ArrayList<Category>(rows.size)
+            for (row in rows) {
+                categories.add(Category(row.id, row.name))
+            }
+            categories
         }
-        .list()
+    }
 
-    override fun findProductsByCategoryId(categoryId: UUID?): List<Product> {
+    override fun findProductsByCategoryId(categoryId: UUID?): Mono<List<Product>> {
         val query = if (categoryId == null) {
-            jdbc.sql("$productSelect ORDER BY name, id")
+            Query.empty()
         } else {
-            jdbc.sql("$productSelect WHERE category_id = :categoryId ORDER BY name, id")
-                .param("categoryId", categoryId)
+            Query.query(Criteria.where("categoryId").`is`(categoryId))
         }
-        return query.query { row, _ -> row.toProduct() }.list()
+        return findProducts(query)
     }
 
-    override fun findProductsByIds(ids: Set<UUID>): List<Product> {
-        if (ids.isEmpty()) return emptyList()
-
-        return jdbc.sql("$productSelect WHERE id IN (:ids) ORDER BY name, id")
-            .param("ids", ids)
-            .query { row, _ -> row.toProduct() }
-            .list()
+    override fun findProductsByIds(ids: Set<UUID>): Mono<List<Product>> {
+        if (ids.isEmpty()) {
+            return Mono.just(emptyList())
+        }
+        return findProducts(Query.query(Criteria.where("id").`in`(ids)))
     }
 
-    private fun ResultSet.toProduct() = Product(
-        id = getObject("id", UUID::class.java),
-        categoryId = getObject("category_id", UUID::class.java),
-        name = getString("name"),
-        description = getString("description"),
-        priceInKopecks = getLong("price_in_kopecks"),
-        available = getBoolean("available"),
-    )
-
-    private val productSelect =
-        "SELECT id, category_id, name, description, price_in_kopecks, available FROM products"
+    private fun findProducts(query: Query): Mono<List<Product>> {
+        val sortedQuery = query.sort(Sort.by("name", "id"))
+        return template.select(ProductRow::class.java).matching(sortedQuery).all().collectList().map { rows ->
+            val products = ArrayList<Product>(rows.size)
+            for (row in rows) {
+                products.add(Product(
+                    id = row.id,
+                    categoryId = row.categoryId,
+                    name = row.name,
+                    description = row.description,
+                    priceInKopecks = row.priceInKopecks,
+                    available = row.available,
+                ))
+            }
+            products
+        }
+    }
 }
+
+@Table("categories")
+private data class CategoryRow(@Id val id: UUID, val name: String)
+
+@Table("products")
+private data class ProductRow(
+    @Id val id: UUID,
+    val categoryId: UUID,
+    val name: String,
+    val description: String?,
+    val priceInKopecks: Long,
+    val available: Boolean,
+)

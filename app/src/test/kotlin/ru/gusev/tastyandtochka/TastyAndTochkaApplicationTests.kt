@@ -1,12 +1,15 @@
 package ru.gusev.tastyandtochka
 
+import io.r2dbc.spi.ConnectionFactory
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.ReactiveTransactionManager
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.postgresql.PostgreSQLContainer
@@ -33,7 +36,7 @@ class TastyAndTochkaApplicationTests {
         }
 
         val firstChangeLog = startApplication("classpath:db/changelog/db.changelog-before-status-lock.yaml").use { context ->
-            val jdbc = JdbcTemplate(context.getBean(DataSource::class.java))
+            val jdbc = JdbcTemplate(testDataSource(postgres))
             assertMenu(jdbc, expectedChangeSets = 3)
             assertEquals(0, count(jdbc, "orders"))
             assertEquals(0, count(jdbc, "order_items"))
@@ -43,7 +46,10 @@ class TastyAndTochkaApplicationTests {
         }
 
         val upgradedChangeLog = startApplication().use { context ->
-            val jdbc = JdbcTemplate(context.getBean(DataSource::class.java))
+            assertEquals(1, context.getBeansOfType(ConnectionFactory::class.java).size)
+            assertEquals(1, context.getBeansOfType(ReactiveTransactionManager::class.java).size)
+            assertTrue(context.getBeansOfType(DataSource::class.java).isEmpty())
+            val jdbc = JdbcTemplate(testDataSource(postgres))
             assertMenu(jdbc)
             assertEquals(firstChangeLog, changeLog(jdbc).take(firstChangeLog.size))
             assertEquals(1, count(jdbc, "orders"))
@@ -58,7 +64,7 @@ class TastyAndTochkaApplicationTests {
         }
 
         startApplication().use { context ->
-            val jdbc = JdbcTemplate(context.getBean(DataSource::class.java))
+            val jdbc = JdbcTemplate(testDataSource(postgres))
             assertEquals(upgradedChangeLog, changeLog(jdbc))
             assertEquals(1, count(jdbc, "orders"))
             assertEquals(1, count(jdbc, "order_items"))
@@ -70,9 +76,7 @@ class TastyAndTochkaApplicationTests {
         changeLog: String = "classpath:db/changelog/db.changelog-master.yaml",
     ): ConfigurableApplicationContext =
         SpringApplicationBuilder(TastyAndTochkaApplication::class.java).run(
-            "--spring.datasource.url=${postgres.jdbcUrl}",
-            "--spring.datasource.username=${postgres.username}",
-            "--spring.datasource.password=${postgres.password}",
+            *databaseArguments(postgres),
             "--spring.liquibase.change-log=$changeLog",
             "--server.port=0",
         )

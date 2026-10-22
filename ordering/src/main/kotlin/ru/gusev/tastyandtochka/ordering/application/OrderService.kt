@@ -1,9 +1,10 @@
 package ru.gusev.tastyandtochka.ordering.application
 
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.reactive.TransactionalEventPublisher
 import ru.gusev.tastyandtochka.catalog.api.CatalogQuery
+import ru.gusev.tastyandtochka.catalog.api.ProductForOrder
 import ru.gusev.tastyandtochka.ordering.api.InvalidOrderException
 import ru.gusev.tastyandtochka.ordering.api.OrderAmountTooLargeException
 import ru.gusev.tastyandtochka.ordering.api.OrderNotFoundException
@@ -12,70 +13,111 @@ import ru.gusev.tastyandtochka.ordering.api.ProductsNotFoundException
 import ru.gusev.tastyandtochka.ordering.api.ProductsUnavailableException
 import ru.gusev.tastyandtochka.ordering.domain.Order
 import ru.gusev.tastyandtochka.ordering.domain.OrderItem
+import reactor.core.publisher.Mono
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Service
-internal class OrderService(
+class OrderService(
     private val catalog: CatalogQuery,
     private val repository: OrderRepository,
-    private val events: ApplicationEventPublisher,
+    private val events: TransactionalEventPublisher,
 ) {
     @Transactional
-    fun create(command: CreateOrderCommand): Order {
-        if (command.items.size !in 1..100) {
-            throw InvalidOrderException("Order must contain between 1 and 100 items")
-        }
-        if (command.items.any { it.quantity !in 1..99 }) {
-            throw InvalidOrderException("Quantity must be between 1 and 99")
-        }
-
-        val productIds = command.items.map { it.productId }.toSet()
-        if (productIds.size != command.items.size) {
-            throw InvalidOrderException("Order must not contain duplicate products")
-        }
-
-        val products = catalog.findProducts(productIds).associateBy { it.id }
-        val missing = productIds - products.keys
-        if (missing.isNotEmpty()) throw ProductsNotFoundException(missing)
-
-        val unavailable = products.values.filterNot { it.available }.map { it.id }.toSet()
-        if (unavailable.isNotEmpty()) throw ProductsUnavailableException(unavailable)
-
-        val order = try {
-            val items = command.items.sortedBy { it.productId.toString() }.map { requested ->
-                val product = products.getValue(requested.productId)
-                OrderItem(
-                    productId = product.id,
-                    productName = product.name,
-                    unitPriceInKopecks = product.priceInKopecks,
-                    quantity = requested.quantity,
-                )
+    fun create(command: CreateOrderCommand): Mono<Order> {
+        return Mono.defer {
+            val productIds = validateItems(command.items)
+            catalog.findProducts(productIds).flatMap { products ->
+                val productsById = checkProducts(productIds, products)
+                val order = buildOrder(command.items, productsById)
+                val event = OrderCreatedEvent(order.id, order.items.size, order.totalPriceInKopecks)
+                repository.save(order)
+                    .then(events.publishEvent(event))
+                    .thenReturn(order)
             }
-            Order(UUID.randomUUID(), items, Instant.now().truncatedTo(ChronoUnit.MICROS))
-        } catch (_: ArithmeticException) {
-            throw OrderAmountTooLargeException()
         }
-
-        repository.save(order)
-        events.publishEvent(OrderCreatedEvent(order.id, order.items.size, order.totalPriceInKopecks))
-        return order
     }
 
     @Transactional(readOnly = true)
-    fun get(id: UUID): Order = repository.findById(id) ?: throw OrderNotFoundException(id)
+    fun get(id: UUID): Mono<Order> {
+        return repository.findById(id).switchIfEmpty(Mono.error(OrderNotFoundException(id)))
+    }
 
     @Transactional
-    fun changeStatus(id: UUID, command: ChangeOrderStatusCommand): Order {
-        val order = repository.findById(id) ?: throw OrderNotFoundException(id)
-        if (order.status != command.expectedStatus) throw OrderStatusConflictException(id)
+    fun changeStatus(id: UUID, command: ChangeOrderStatusCommand): Mono<Order> {
+        return repository.findById(id)
+            .switchIfEmpty(Mono.error(OrderNotFoundException(id)))
+            .flatMap { order ->
+                if (order.status != command.expectedStatus) {
+                    throw OrderStatusConflictException(id)
+                }
+                val previousStatus = order.status
+                order.changeStatus(command.status)
+                repository.updateStatus(order, command.expectedStatus).flatMap { updated ->
+                    if (!updated) {
+                        throw OrderStatusConflictException(id)
+                    }
+                    val event = OrderStatusChangedEvent(order.id, previousStatus, order.status)
+                    events.publishEvent(event).thenReturn(order)
+                }
+            }
+    }
 
-        val previousStatus = order.status
-        order.changeStatus(command.status)
-        if (!repository.updateStatus(order, command.expectedStatus)) throw OrderStatusConflictException(id)
-        events.publishEvent(OrderStatusChangedEvent(order.id, previousStatus, order.status))
+    private fun validateItems(items: List<RequestedOrderItem>): Set<UUID> {
+        if (items.isEmpty() || items.size > 100) {
+            throw InvalidOrderException("Order must contain between 1 and 100 items")
+        }
 
-        return order
+        val productIds = HashSet<UUID>()
+        for (item in items) {
+            if (item.quantity < 1 || item.quantity > 99) {
+                throw InvalidOrderException("Quantity must be between 1 and 99")
+            }
+            if (!productIds.add(item.productId)) {
+                throw InvalidOrderException("Order must not contain duplicate products")
+            }
+        }
+        return productIds
+    }
+
+    private fun checkProducts(ids: Set<UUID>, products: List<ProductForOrder>): Map<UUID, ProductForOrder> {
+        val productsById = HashMap<UUID, ProductForOrder>()
+        for (product in products) {
+            productsById[product.id] = product
+        }
+
+        val missingIds = HashSet<UUID>()
+        val unavailableIds = HashSet<UUID>()
+        for (id in ids) {
+            val product = productsById[id]
+            if (product == null) {
+                missingIds.add(id)
+            } else if (!product.available) {
+                unavailableIds.add(id)
+            }
+        }
+        if (missingIds.isNotEmpty()) {
+            throw ProductsNotFoundException(missingIds)
+        }
+        if (unavailableIds.isNotEmpty()) {
+            throw ProductsUnavailableException(unavailableIds)
+        }
+        return productsById
+    }
+
+    private fun buildOrder(requestedItems: List<RequestedOrderItem>, products: Map<UUID, ProductForOrder>): Order {
+        try {
+            // Return positions in the same stable order as when reading the order from PostgreSQL.
+            val sortedItems = requestedItems.sortedBy { requestedItem -> requestedItem.productId.toString() }
+            val items = ArrayList<OrderItem>(sortedItems.size)
+            for (requestedItem in sortedItems) {
+                val product = products.getValue(requestedItem.productId)
+                items.add(OrderItem(product.id, product.name, product.priceInKopecks, requestedItem.quantity))
+            }
+            return Order(UUID.randomUUID(), items, Instant.now().truncatedTo(ChronoUnit.MICROS))
+        } catch (_: ArithmeticException) {
+            throw OrderAmountTooLargeException()
+        }
     }
 }

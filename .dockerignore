@@ -1,6 +1,7 @@
 .git
 .gradle
 **/.gradle
+.kotlin
 .idea
 .codex
 .agents

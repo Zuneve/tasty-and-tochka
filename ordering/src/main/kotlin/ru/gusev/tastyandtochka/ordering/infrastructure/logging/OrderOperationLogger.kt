@@ -8,7 +8,7 @@ import ru.gusev.tastyandtochka.ordering.application.OrderCreatedEvent
 import ru.gusev.tastyandtochka.ordering.application.OrderStatusChangedEvent
 
 @Component
-internal class OrderOperationLogger {
+class OrderOperationLogger {
     private val logger = LoggerFactory.getLogger(OrderOperationLogger::class.java)
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)

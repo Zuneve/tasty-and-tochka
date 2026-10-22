@@ -9,7 +9,7 @@ data class OrderItem(
     val quantity: Int,
 ) {
     init {
-        require(quantity in 1..99) { "Quantity must be between 1 and 99" }
+        require(quantity >= 1 && quantity <= 99) { "Quantity must be between 1 and 99" }
         require(productName.isNotBlank()) { "Product name must not be blank" }
         require(unitPriceInKopecks >= 0) { "Unit price must not be negative" }
     }

@@ -26,7 +26,6 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
-import javax.sql.DataSource
 
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -41,14 +40,12 @@ class ApiErrorHandlingTest {
     private val client = HttpClient.newHttpClient()
     private val json = JsonMapper()
     private val jdbc: JdbcTemplate
-        get() = JdbcTemplate(context.getBean(DataSource::class.java))
+        get() = JdbcTemplate(testDataSource(postgres))
 
     @BeforeAll
     fun start() {
         context = SpringApplicationBuilder(TastyAndTochkaApplication::class.java).run(
-            "--spring.datasource.url=${postgres.jdbcUrl}",
-            "--spring.datasource.username=${postgres.username}",
-            "--spring.datasource.password=${postgres.password}",
+            *databaseArguments(postgres),
             "--server.port=0",
         )
     }

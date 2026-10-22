@@ -25,7 +25,6 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.LockSupport
-import javax.sql.DataSource
 
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -41,7 +40,7 @@ class OrderStatusApiTest {
     private val json = JsonMapper()
 
     private val jdbc: JdbcTemplate
-        get() = JdbcTemplate(context.getBean(DataSource::class.java))
+        get() = JdbcTemplate(testDataSource(postgres))
 
     @BeforeAll
     fun start() {
@@ -198,7 +197,7 @@ class OrderStatusApiTest {
         val original = createOrder()
         val id = original["id"].asString()
         Executors.newFixedThreadPool(2).use { executor ->
-            val pending = context.getBean(DataSource::class.java).connection.use { blocker ->
+            val pending = testDataSource(postgres).connection.use { blocker ->
                 blocker.autoCommit = false
                 try {
                     // Hold only the writes: both HTTP requests can read CREATED before either updates it.
@@ -234,7 +233,7 @@ class OrderStatusApiTest {
             val blocked = jdbc.queryForObject(
                 """
                 SELECT count(*) FROM pg_stat_activity
-                WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE 'UPDATE orders%'
+                WHERE datname = current_database() AND wait_event_type = 'Lock' AND upper(query) LIKE 'UPDATE%ORDERS%SET%'
                 """.trimIndent(),
                 Int::class.java,
             )!!
@@ -246,9 +245,7 @@ class OrderStatusApiTest {
 
     private fun startApplication(): ConfigurableApplicationContext =
         SpringApplicationBuilder(TastyAndTochkaApplication::class.java).run(
-            "--spring.datasource.url=${postgres.jdbcUrl}",
-            "--spring.datasource.username=${postgres.username}",
-            "--spring.datasource.password=${postgres.password}",
+            *databaseArguments(postgres),
             "--server.port=0",
         )
 

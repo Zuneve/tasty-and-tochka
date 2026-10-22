@@ -23,7 +23,6 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Instant
 import java.util.UUID
-import javax.sql.DataSource
 
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -44,7 +43,7 @@ class OrderApiTest {
     private val json = JsonMapper()
 
     private val jdbc: JdbcTemplate
-        get() = JdbcTemplate(context.getBean(DataSource::class.java))
+        get() = JdbcTemplate(testDataSource(postgres))
 
     @BeforeAll
     fun start() {
@@ -244,9 +243,7 @@ class OrderApiTest {
 
     private fun startApplication(): ConfigurableApplicationContext =
         SpringApplicationBuilder(TastyAndTochkaApplication::class.java).run(
-            "--spring.datasource.url=${postgres.jdbcUrl}",
-            "--spring.datasource.username=${postgres.username}",
-            "--spring.datasource.password=${postgres.password}",
+            *databaseArguments(postgres),
             "--server.port=0",
         )
 

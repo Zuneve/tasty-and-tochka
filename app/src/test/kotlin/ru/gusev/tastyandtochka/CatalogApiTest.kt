@@ -33,17 +33,20 @@ class CatalogApiTest {
         @DynamicPropertySource
         @JvmStatic
         fun databaseProperties(registry: DynamicPropertyRegistry) {
-            registry.add("spring.datasource.url", postgres::getJdbcUrl)
-            registry.add("spring.datasource.username", postgres::getUsername)
-            registry.add("spring.datasource.password", postgres::getPassword)
+            registry.add("spring.r2dbc.url") { "r2dbc:${postgres.jdbcUrl.removePrefix("jdbc:")}" }
+            registry.add("spring.r2dbc.username", postgres::getUsername)
+            registry.add("spring.r2dbc.password", postgres::getPassword)
+            registry.add("spring.liquibase.url", postgres::getJdbcUrl)
+            registry.add("spring.liquibase.user", postgres::getUsername)
+            registry.add("spring.liquibase.password", postgres::getPassword)
         }
     }
 
     @Autowired
     private lateinit var environment: Environment
 
-    @Autowired
-    private lateinit var jdbc: JdbcTemplate
+    private val jdbc: JdbcTemplate
+        get() = JdbcTemplate(testDataSource(postgres))
 
     @Autowired
     private lateinit var catalog: CatalogQuery
@@ -121,7 +124,7 @@ class CatalogApiTest {
         val unavailableId = UUID.fromString("20000000-0000-0000-0000-000000000006")
         val missingId = UUID.fromString("00000000-0000-0000-0000-000000000000")
 
-        val products = catalog.findProducts(setOf(availableId, unavailableId, missingId))
+        val products = catalog.findProducts(setOf(availableId, unavailableId, missingId)).block()!!
 
         assertEquals(setOf(availableId, unavailableId), products.map { it.id }.toSet())
         assertEquals(19900L, products.single { it.id == availableId }.priceInKopecks)
@@ -130,7 +133,7 @@ class CatalogApiTest {
 
     @Test
     fun `public catalog query accepts an empty set`() {
-        assertTrue(catalog.findProducts(emptySet()).isEmpty())
+        assertTrue(catalog.findProducts(emptySet()).block()!!.isEmpty())
     }
 
     private fun get(path: String): HttpResponse<String> {

@@ -21,13 +21,20 @@ class Order private constructor(
 
     init {
         require(this.items.isNotEmpty()) { "Order must contain at least one item" }
-        require(this.items.map { it.productId }.distinct().size == this.items.size) {
-            "Order must not contain duplicate products"
+        val productIds = HashSet<UUID>()
+        for (item in this.items) {
+            require(productIds.add(item.productId)) { "Order must not contain duplicate products" }
         }
     }
 
-    val totalPriceInKopecks: Long = this.items.fold(0L) { total, item ->
-        Math.addExact(total, item.totalPriceInKopecks)
+    val totalPriceInKopecks: Long = calculateTotal()
+
+    private fun calculateTotal(): Long {
+        var total = 0L
+        for (item in items) {
+            total = Math.addExact(total, item.totalPriceInKopecks)
+        }
+        return total
     }
 
     fun changeStatus(newStatus: OrderStatus) {
