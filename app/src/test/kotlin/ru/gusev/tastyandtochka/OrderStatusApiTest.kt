@@ -54,12 +54,12 @@ class OrderStatusApiTest {
     }
 
     @Test
-    fun `advances the lifecycle and persists the changed version across a restart`() {
+    fun `advances the lifecycle and persists the changed status across a restart`() {
         val original = createOrder()
         val id = original["id"].asString()
-        val preparing = body(changeStatus(id, "PREPARING", 0), 200)
+        val preparing = body(changeStatus(id, "PREPARING", "CREATED"), 200)
         assertEquals("PREPARING", preparing["status"].asString())
-        assertEquals(1L, preparing["version"].asLong())
+        assertTrue(!preparing.has("version"))
         assertEquals(original["items"], preparing["items"])
         assertEquals(original["totalPriceInKopecks"], preparing["totalPriceInKopecks"])
         assertEquals(original["createdAt"], preparing["createdAt"])
@@ -68,12 +68,10 @@ class OrderStatusApiTest {
         context = startApplication()
         assertEquals(preparing, getOrder(id))
 
-        val ready = body(changeStatus(id, "READY", 1), 200)
+        val ready = body(changeStatus(id, "READY", "PREPARING"), 200)
         assertEquals("READY", ready["status"].asString())
-        assertEquals(2L, ready["version"].asLong())
-        val completed = body(changeStatus(id, "COMPLETED", 2), 200)
+        val completed = body(changeStatus(id, "COMPLETED", "READY"), 200)
         assertEquals("COMPLETED", completed["status"].asString())
-        assertEquals(3L, completed["version"].asLong())
         assertEquals(completed, getOrder(id))
     }
 
@@ -108,10 +106,9 @@ class OrderStatusApiTest {
 
         var current = created
         for (status in listOf("PREPARING", "READY", "COMPLETED")) {
-            val previousVersion = current["version"].asLong()
-            current = body(changeStatus(id, status, previousVersion), 200)
+            val previousStatus = current["status"].asString()
+            current = body(changeStatus(id, status, previousStatus), 200)
             assertEquals(status, current["status"].asString())
-            assertEquals(previousVersion + 1, current["version"].asLong())
             assertEquals(created["items"], current["items"])
             assertEquals(created["totalPriceInKopecks"], current["totalPriceInKopecks"])
             assertEquals(current, getOrder(id))
@@ -124,7 +121,7 @@ class OrderStatusApiTest {
         val original = createOrder()
         val id = original["id"].asString()
 
-        val error = body(changeStatus(id, status, 0), 409)
+        val error = body(changeStatus(id, status, "CREATED"), 409)
 
         assertEquals("INVALID_ORDER_STATUS_TRANSITION", error["code"].asString())
         assertEquals(original, getOrder(id))
@@ -133,51 +130,52 @@ class OrderStatusApiTest {
     @Test
     fun `cancels a new order and rejects any further change`() {
         val id = createOrder()["id"].asString()
-        val cancelled = body(changeStatus(id, "CANCELLED", 0), 200)
+        val cancelled = body(changeStatus(id, "CANCELLED", "CREATED"), 200)
         assertEquals("CANCELLED", cancelled["status"].asString())
-        assertEquals(1L, cancelled["version"].asLong())
 
-        assertEquals("INVALID_ORDER_STATUS_TRANSITION", body(changeStatus(id, "PREPARING", 1), 409)["code"].asString())
+        assertEquals("INVALID_ORDER_STATUS_TRANSITION", body(changeStatus(id, "PREPARING", "CANCELLED"), 409)["code"].asString())
         assertEquals(cancelled, getOrder(id))
     }
 
     @Test
     fun `cannot cancel preparation or change a completed order`() {
         val id = createOrder()["id"].asString()
-        val preparing = body(changeStatus(id, "PREPARING", 0), 200)
+        val preparing = body(changeStatus(id, "PREPARING", "CREATED"), 200)
 
-        assertEquals("INVALID_ORDER_STATUS_TRANSITION", body(changeStatus(id, "CANCELLED", 1), 409)["code"].asString())
+        assertEquals("INVALID_ORDER_STATUS_TRANSITION", body(changeStatus(id, "CANCELLED", "PREPARING"), 409)["code"].asString())
         assertEquals(preparing, getOrder(id))
 
-        body(changeStatus(id, "READY", 1), 200)
-        val completed = body(changeStatus(id, "COMPLETED", 2), 200)
-        assertEquals("INVALID_ORDER_STATUS_TRANSITION", body(changeStatus(id, "CANCELLED", 3), 409)["code"].asString())
+        body(changeStatus(id, "READY", "PREPARING"), 200)
+        val completed = body(changeStatus(id, "COMPLETED", "READY"), 200)
+        assertEquals("INVALID_ORDER_STATUS_TRANSITION", body(changeStatus(id, "CANCELLED", "COMPLETED"), 409)["code"].asString())
         assertEquals(completed, getOrder(id))
     }
 
     @Test
-    fun `rejects a stale version and accepts the reloaded version`() {
+    fun `rejects a stale status and accepts the reloaded status`() {
         val id = createOrder()["id"].asString()
-        val preparing = body(changeStatus(id, "PREPARING", 0), 200)
+        val preparing = body(changeStatus(id, "PREPARING", "CREATED"), 200)
 
-        assertEquals("ORDER_VERSION_CONFLICT", body(changeStatus(id, "READY", 0), 409)["code"].asString())
+        assertEquals("ORDER_STATUS_CONFLICT", body(changeStatus(id, "READY", "CREATED"), 409)["code"].asString())
         assertEquals(preparing, getOrder(id))
 
-        val ready = body(changeStatus(id, "READY", 1), 200)
+        val reloadedStatus = getOrder(id)["status"].asString()
+        val ready = body(changeStatus(id, "READY", reloadedStatus), 200)
         assertEquals("READY", ready["status"].asString())
-        assertEquals(2L, ready["version"].asLong())
     }
 
     @ParameterizedTest
     @ValueSource(strings = [
         "{}",
         "{",
-        """{"status":null,"version":0}""",
-        """{"status":"UNKNOWN","version":0}""",
-        """{"version":0}""",
+        """{"status":null,"expectedStatus":"CREATED"}""",
+        """{"status":"UNKNOWN","expectedStatus":"CREATED"}""",
+        """{"expectedStatus":"CREATED"}""",
         """{"status":"PREPARING"}""",
-        """{"status":"PREPARING","version":null}""",
-        """{"status":"PREPARING","version":-1}""",
+        """{"status":"PREPARING","expectedStatus":null}""",
+        """{"status":"PREPARING","expectedStatus":"UNKNOWN"}""",
+        """{"status":"PREPARING","expectedStatus":{}}""",
+        """{"status":"PREPARING","version":0}""",
     ])
     fun `rejects invalid status requests without changing the order`(request: String) {
         val original = createOrder()
@@ -190,26 +188,26 @@ class OrderStatusApiTest {
 
     @Test
     fun `returns not found for a missing order and bad request for an invalid identifier`() {
-        assertEquals("ORDER_NOT_FOUND", body(changeStatus(UUID.randomUUID().toString(), "PREPARING", 0), 404)["code"].asString())
-        assertEquals("INVALID_REQUEST", body(changeStatus("not-a-uuid", "PREPARING", 0), 400)["code"].asString())
+        assertEquals("ORDER_NOT_FOUND", body(changeStatus(UUID.randomUUID().toString(), "PREPARING", "CREATED"), 404)["code"].asString())
+        assertEquals("INVALID_REQUEST", body(changeStatus("not-a-uuid", "PREPARING", "CREATED"), 400)["code"].asString())
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["PREPARING", "CANCELLED"])
-    fun `only one concurrent update of the same version succeeds`(competingStatus: String) {
+    fun `only one concurrent update from the same status succeeds`(competingStatus: String) {
         val original = createOrder()
         val id = original["id"].asString()
         Executors.newFixedThreadPool(2).use { executor ->
             val pending = context.getBean(DataSource::class.java).connection.use { blocker ->
                 blocker.autoCommit = false
                 try {
-                    // Hold only the writes: both HTTP requests can read version 0 before either updates it.
+                    // Hold only the writes: both HTTP requests can read CREATED before either updates it.
                     blocker.prepareStatement("SELECT id FROM orders WHERE id = ? FOR UPDATE").use { statement ->
                         statement.setObject(1, UUID.fromString(id))
                         statement.executeQuery().use { assertTrue(it.next()) }
                     }
                     val requests = listOf("PREPARING", competingStatus).map { status ->
-                        executor.submit<HttpResponse<String>> { changeStatus(id, status, 0) }
+                        executor.submit<HttpResponse<String>> { changeStatus(id, status, "CREATED") }
                     }
                     awaitBlockedUpdates()
                     requests
@@ -222,9 +220,8 @@ class OrderStatusApiTest {
             assertEquals(listOf(200, 409), responses.map { it.statusCode() }.sorted())
             val winner = body(responses.single { it.statusCode() == 200 }, 200)
             val loser = body(responses.single { it.statusCode() == 409 }, 409)
-            assertEquals("ORDER_VERSION_CONFLICT", loser["code"].asString())
+            assertEquals("ORDER_STATUS_CONFLICT", loser["code"].asString())
             assertTrue(winner["status"].asString() in setOf("PREPARING", "CANCELLED"))
-            assertEquals(1L, winner["version"].asLong())
             assertEquals(original["items"], winner["items"])
             assertEquals(original["totalPriceInKopecks"], winner["totalPriceInKopecks"])
             assertEquals(winner, getOrder(id))
@@ -278,8 +275,8 @@ class OrderStatusApiTest {
         200,
     )
 
-    private fun changeStatus(id: String, status: String, version: Long): HttpResponse<String> =
-        patch(id, """{"status":"$status","version":$version}""")
+    private fun changeStatus(id: String, status: String, expectedStatus: String): HttpResponse<String> =
+        patch(id, """{"status":"$status","expectedStatus":"$expectedStatus"}""")
 
     private fun patch(id: String, body: String): HttpResponse<String> = client.send(
         HttpRequest.newBuilder(uri("/api/v1/orders/$id/status"))

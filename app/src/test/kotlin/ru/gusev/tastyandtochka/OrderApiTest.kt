@@ -64,7 +64,7 @@ class OrderApiTest {
 
         assertEquals("/api/v1/orders/${order["id"].asString()}", location)
         assertEquals("CREATED", order["status"].asString())
-        assertEquals(0L, order["version"].asLong())
+        assertTrue(!order.has("version"))
         assertEquals(31700L, order["totalPriceInKopecks"].asLong())
         assertTrue(Instant.parse(order["createdAt"].asString()) <= Instant.now())
         assertEquals(2, order["items"].size())
@@ -107,15 +107,15 @@ class OrderApiTest {
     }
 
     @Test
-    fun `reads persisted status and version`() {
+    fun `reads persisted status`() {
         val order = body(post(defaultRequest()), 201)
         val id = UUID.fromString(order["id"].asString())
-        jdbc.update("UPDATE orders SET status = 'READY', version = 7 WHERE id = ?", id)
+        jdbc.update("UPDATE orders SET status = 'READY' WHERE id = ?", id)
 
         val restored = body(get("/api/v1/orders/$id"), 200)
 
         assertEquals("READY", restored["status"].asString())
-        assertEquals(7L, restored["version"].asLong())
+        assertTrue(!restored.has("version"))
         assertEquals(order["items"], restored["items"])
     }
 

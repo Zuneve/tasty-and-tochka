@@ -41,7 +41,7 @@ internal class OrderController(private val service: OrderService) {
         id,
         ChangeOrderStatusCommand(
             status = request.status,
-            expectedVersion = request.version ?: throw InvalidOrderException("Order version is required"),
+            expectedStatus = request.expectedStatus ?: throw InvalidOrderException("Expected order status is required"),
         ),
     ).toResponse()
 }

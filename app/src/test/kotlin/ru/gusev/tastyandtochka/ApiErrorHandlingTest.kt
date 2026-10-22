@@ -120,13 +120,13 @@ class ApiErrorHandlingTest {
             val response = request("POST", "/api/v1/orders", validOrder())
             assertEquals(201, response.statusCode(), response.body())
             val id = json.readTree(response.body())["id"].asString()
-            val updated = request("PATCH", "/api/v1/orders/$id/status", """{"status":"PREPARING","version":0}""")
+            val updated = request("PATCH", "/api/v1/orders/$id/status", """{"status":"PREPARING","expectedStatus":"CREATED"}""")
             assertEquals(200, updated.statusCode(), updated.body())
 
             assertEquals(2, events.list.size)
             assertTrue(events.list.all { it.level == Level.INFO && it.formattedMessage.contains(id) })
             assertTrue(events.list[0].formattedMessage.contains("totalPriceInKopecks="))
-            assertTrue(events.list[1].formattedMessage.contains("from=CREATED to=PREPARING version=1"))
+            assertTrue(events.list[1].formattedMessage.contains("from=CREATED to=PREPARING"))
         }
     }
 
@@ -158,7 +158,7 @@ class ApiErrorHandlingTest {
             captureOperations { events ->
                 assertError(request("POST", "/api/v1/orders", validOrder()), 500, "INTERNAL_ERROR")
                 assertError(
-                    request("PATCH", "/api/v1/orders/$id/status", """{"status":"PREPARING","version":0}"""),
+                    request("PATCH", "/api/v1/orders/$id/status", """{"status":"PREPARING","expectedStatus":"CREATED"}"""),
                     500, "INTERNAL_ERROR",
                 )
 

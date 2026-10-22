@@ -22,8 +22,8 @@ internal class OrderOperationLogger {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun statusChanged(event: OrderStatusChangedEvent) {
         logger.info(
-            "Order status changed orderId={} from={} to={} version={}",
-            event.orderId, event.previousStatus, event.status, event.version,
+            "Order status changed orderId={} from={} to={}",
+            event.orderId, event.previousStatus, event.status,
         )
     }
 }

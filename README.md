@@ -87,7 +87,7 @@ PostgreSQL применяет имя БД, пользователя и паро�
 | `GET` | `/api/v1/products?categoryId={uuid}` | Товары категории |
 | `POST` | `/api/v1/orders` | Создать заказ |
 | `GET` | `/api/v1/orders/{uuid}` | Получить заказ |
-| `PATCH` | `/api/v1/orders/{uuid}/status` | Изменить статус с проверкой версии |
+| `PATCH` | `/api/v1/orders/{uuid}/status` | Изменить статус с проверкой ожидаемого статуса |
 
 ### 1. Посмотреть меню
 
@@ -105,7 +105,7 @@ curl -i -X POST http://localhost:8080/api/v1/orders \
   -d '{"items":[{"productId":"20000000-0000-0000-0000-000000000001","quantity":2},{"productId":"20000000-0000-0000-0000-000000000003","quantity":1}]}'
 ```
 
-Ответ: `201 Created`, заголовок `Location: /api/v1/orders/{uuid}` и JSON заказа. Для начального меню сумма равна `31700` копеек, статус — `CREATED`, версия — `0`.
+Ответ: `201 Created`, заголовок `Location: /api/v1/orders/{uuid}` и JSON заказа. Для начального меню сумма равна `31700` копеек, статус — `CREATED`.
 
 Заказ содержит от 1 до 100 разных товаров, количество каждого — от 1 до 99. Повторы товаров отклоняются. Клиент передаёт идентификаторы и количество; цены сервер получает из каталога.
 
@@ -119,20 +119,20 @@ curl --fail "http://localhost:8080/api/v1/orders/$ORDER_ID"
 
 curl --fail -X PATCH "http://localhost:8080/api/v1/orders/$ORDER_ID/status" \
   -H 'Content-Type: application/json' \
-  -d '{"status":"PREPARING","version":0}'
+  -d '{"status":"PREPARING","expectedStatus":"CREATED"}'
 
 curl --fail -X PATCH "http://localhost:8080/api/v1/orders/$ORDER_ID/status" \
   -H 'Content-Type: application/json' \
-  -d '{"status":"READY","version":1}'
+  -d '{"status":"READY","expectedStatus":"PREPARING"}'
 
 curl --fail -X PATCH "http://localhost:8080/api/v1/orders/$ORDER_ID/status" \
   -H 'Content-Type: application/json' \
-  -d '{"status":"COMPLETED","version":2}'
+  -d '{"status":"COMPLETED","expectedStatus":"READY"}'
 ```
 
-Успешное изменение возвращает `200` и новую версию. В запросе передавай версию из последнего ответа сервера. Сохранение выполняет условный `UPDATE ... WHERE id = ... AND version = ...`: из двух изменений одной версии успешно применится одно. После `409 ORDER_VERSION_CONFLICT` перечитай заказ и реши, актуально ли ещё действие.
+Успешное изменение возвращает `200` и обновлённый заказ. В `status` передавай новый статус, в `expectedStatus` — статус из последнего ответа сервера. Сохранение выполняет условный `UPDATE ... WHERE id = ... AND status = :expectedStatus`: из двух изменений одного исходного статуса успешно применится одно. После `409 ORDER_STATUS_CONFLICT` перечитай заказ и реши, актуально ли ещё действие. Это работает для текущего жизненного цикла без возвратов в предыдущие статусы.
 
-Для отмены создай другой новый заказ и отправь для него `{"status":"CANCELLED","version":0}`. Отмена после начала приготовления возвращает `409`.
+Для отмены создай другой новый заказ и отправь для него `{"status":"CANCELLED","expectedStatus":"CREATED"}`. Отмена после начала приготовления возвращает `409`.
 
 ### Ошибки
 
@@ -140,8 +140,8 @@ curl --fail -X PATCH "http://localhost:8080/api/v1/orders/$ORDER_ID/status" \
 
 ```json
 {
-  "code": "ORDER_VERSION_CONFLICT",
-  "message": "Order has changed; reload it before retrying",
+  "code": "ORDER_STATUS_CONFLICT",
+  "message": "Order 30000000-0000-0000-0000-000000000001 status has changed; reload it before retrying",
   "productIds": null
 }
 ```
@@ -154,7 +154,7 @@ curl --fail -X PATCH "http://localhost:8080/api/v1/orders/$ORDER_ID/status" \
 | `404` | `ORDER_NOT_FOUND`, `NOT_FOUND` | Заказ или ресурс не найден |
 | `405` | `METHOD_NOT_ALLOWED` | Метод не поддерживается; допустимые методы указаны в `Allow` |
 | `406` | `NOT_ACCEPTABLE` | Запрошен неподдерживаемый формат ответа |
-| `409` | `ORDER_VERSION_CONFLICT`, `INVALID_ORDER_STATUS_TRANSITION` | Устаревшая версия или запрещённый переход |
+| `409` | `ORDER_STATUS_CONFLICT`, `INVALID_ORDER_STATUS_TRANSITION` | Статус уже изменился или переход запрещён |
 | `415` | `UNSUPPORTED_MEDIA_TYPE` | Неподдерживаемый `Content-Type` |
 | `422` | `PRODUCTS_NOT_FOUND`, `PRODUCTS_UNAVAILABLE`, `ORDER_AMOUNT_TOO_LARGE` | Заказ нельзя оформить |
 | `500` | `INTERNAL_ERROR` | Неожиданная ошибка; подробности остаются в серверном логе |
@@ -170,7 +170,7 @@ curl --fail -X PATCH "http://localhost:8080/api/v1/orders/$ORDER_ID/status" \
 
 Unit-тесты проверяют доменные правила без Spring и БД. Интеграционные тесты поднимают отдельные PostgreSQL-контейнеры через Testcontainers, применяют миграции и выполняют настоящие HTTP-запросы. Локальный `.env` для тестов не нужен, данные Compose не используются.
 
-Проверяются оформление и полный жизненный цикл заказа, отказ для неверных данных, сохранность цены, перезапуск приложения, откат при ошибке сохранения и коммита, отсутствие ложных логов успеха и конкурентные изменения одной версии. В тесте гонки оба запроса доходят до записи до снятия тестовой блокировки строки.
+Проверяются оформление и полный жизненный цикл заказа, отказ для неверных данных, сохранность цены, обновление существующей БД и перезапуск приложения, откат при ошибке сохранения и коммита, отсутствие ложных логов успеха и конкурентные изменения одного исходного статуса. В тесте гонки оба запроса доходят до записи до снятия тестовой блокировки строки.
 
 Dockerfile собирает исполняемый JAR через `bootJar`; тесты запускаются отдельно указанной командой. Полученный локально JAR находится в `app/build/libs/app.jar`.
 

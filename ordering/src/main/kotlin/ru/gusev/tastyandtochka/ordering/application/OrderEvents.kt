@@ -9,5 +9,4 @@ internal data class OrderStatusChangedEvent(
     val orderId: UUID,
     val previousStatus: OrderStatus,
     val status: OrderStatus,
-    val version: Long,
 )

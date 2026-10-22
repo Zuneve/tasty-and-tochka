@@ -9,38 +9,28 @@ import java.util.UUID
 
 class OrderTest {
     @Test
-    fun `restores persisted status version and timestamp`() {
+    fun `restores persisted status and timestamp`() {
         val id = UUID.randomUUID()
         val createdAt = Instant.parse("2026-10-18T12:00:00Z")
-        val order = Order.restore(id, listOf(item()), createdAt, OrderStatus.READY, 7)
+        val order = Order.restore(id, listOf(item()), createdAt, OrderStatus.READY)
 
         assertEquals(id, order.id)
         assertEquals(createdAt, order.createdAt)
         assertEquals(OrderStatus.READY, order.status)
-        assertEquals(7L, order.version)
-    }
-
-    @Test
-    fun `rejects restoring a negative version`() {
-        assertThrows(IllegalArgumentException::class.java) {
-            Order.restore(UUID.randomUUID(), listOf(item()), Instant.now(), OrderStatus.CREATED, -1)
-        }
     }
 
     @Test
     fun `new order starts with CREATED status`() {
         assertEquals(OrderStatus.CREATED, order().status)
-        assertEquals(0L, order().version)
     }
 
     @Test
-    fun `increments a restored version when status changes`() {
-        val order = Order.restore(UUID.randomUUID(), listOf(item()), Instant.now(), OrderStatus.READY, 7)
+    fun `changes a restored order status`() {
+        val order = Order.restore(UUID.randomUUID(), listOf(item()), Instant.now(), OrderStatus.READY)
 
         order.changeStatus(OrderStatus.COMPLETED)
 
         assertEquals(OrderStatus.COMPLETED, order.status)
-        assertEquals(8L, order.version)
     }
 
     @Test
@@ -118,15 +108,12 @@ class OrderTest {
         for (from in OrderStatus.entries) {
             for (to in OrderStatus.entries) {
                 val order = orderWithStatus(from)
-                val version = order.version
                 if ((from to to) in allowedTransitions) {
                     order.changeStatus(to)
                     assertEquals(to, order.status)
-                    assertEquals(version + 1, order.version)
                 } else {
                     assertThrows(InvalidOrderStatusTransitionException::class.java, { order.changeStatus(to) }, "$from -> $to")
                     assertEquals(from, order.status)
-                    assertEquals(version, order.version)
                 }
             }
         }

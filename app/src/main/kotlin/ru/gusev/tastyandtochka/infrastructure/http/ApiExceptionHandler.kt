@@ -15,7 +15,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import ru.gusev.tastyandtochka.ordering.api.InvalidOrderException
 import ru.gusev.tastyandtochka.ordering.api.OrderAmountTooLargeException
 import ru.gusev.tastyandtochka.ordering.api.OrderNotFoundException
-import ru.gusev.tastyandtochka.ordering.api.OrderVersionConflictException
+import ru.gusev.tastyandtochka.ordering.api.OrderStatusConflictException
 import ru.gusev.tastyandtochka.ordering.api.ProductsNotFoundException
 import ru.gusev.tastyandtochka.ordering.api.ProductsUnavailableException
 import ru.gusev.tastyandtochka.ordering.domain.InvalidOrderStatusTransitionException
@@ -45,9 +45,9 @@ internal class ApiExceptionHandler : ResponseEntityExceptionHandler() {
     fun missingOrder(exception: OrderNotFoundException, request: WebRequest): ResponseEntity<ApiErrorResponse> =
         error(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", exception.message ?: "Order was not found", request)
 
-    @ExceptionHandler(OrderVersionConflictException::class)
-    fun versionConflict(exception: OrderVersionConflictException, request: WebRequest): ResponseEntity<ApiErrorResponse> =
-        error(HttpStatus.CONFLICT, "ORDER_VERSION_CONFLICT", exception.message ?: "Order has changed", request)
+    @ExceptionHandler(OrderStatusConflictException::class)
+    fun statusConflict(exception: OrderStatusConflictException, request: WebRequest): ResponseEntity<ApiErrorResponse> =
+        error(HttpStatus.CONFLICT, "ORDER_STATUS_CONFLICT", exception.message ?: "Order status has changed", request)
 
     @ExceptionHandler(InvalidOrderStatusTransitionException::class)
     fun invalidTransition(exception: InvalidOrderStatusTransitionException, request: WebRequest): ResponseEntity<ApiErrorResponse> =

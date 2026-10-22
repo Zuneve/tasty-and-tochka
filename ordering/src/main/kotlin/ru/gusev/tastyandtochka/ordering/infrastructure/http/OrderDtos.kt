@@ -28,15 +28,13 @@ internal data class CreateOrderItemRequest(
 internal data class ChangeOrderStatusRequest(
     val status: OrderStatus,
     @field:NotNull
-    @field:Min(0)
-    val version: Long?,
+    val expectedStatus: OrderStatus?,
 )
 
 internal data class OrderResponse(
     val id: UUID,
     val status: String,
     val createdAt: Instant,
-    val version: Long,
     val totalPriceInKopecks: Long,
     val items: List<OrderItemResponse>,
 )
@@ -53,7 +51,6 @@ internal fun Order.toResponse() = OrderResponse(
     id = id,
     status = status.name,
     createdAt = createdAt,
-    version = version,
     totalPriceInKopecks = totalPriceInKopecks,
     items = items.map { item ->
         OrderItemResponse(item.productId, item.productName, item.unitPriceInKopecks, item.quantity, item.totalPriceInKopecks)

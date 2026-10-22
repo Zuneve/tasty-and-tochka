@@ -7,7 +7,7 @@ import ru.gusev.tastyandtochka.catalog.api.CatalogQuery
 import ru.gusev.tastyandtochka.ordering.api.InvalidOrderException
 import ru.gusev.tastyandtochka.ordering.api.OrderAmountTooLargeException
 import ru.gusev.tastyandtochka.ordering.api.OrderNotFoundException
-import ru.gusev.tastyandtochka.ordering.api.OrderVersionConflictException
+import ru.gusev.tastyandtochka.ordering.api.OrderStatusConflictException
 import ru.gusev.tastyandtochka.ordering.api.ProductsNotFoundException
 import ru.gusev.tastyandtochka.ordering.api.ProductsUnavailableException
 import ru.gusev.tastyandtochka.ordering.domain.Order
@@ -68,15 +68,13 @@ internal class OrderService(
 
     @Transactional
     fun changeStatus(id: UUID, command: ChangeOrderStatusCommand): Order {
-        if (command.expectedVersion < 0) throw InvalidOrderException("Order version must not be negative")
-
         val order = repository.findById(id) ?: throw OrderNotFoundException(id)
-        if (order.version != command.expectedVersion) throw OrderVersionConflictException(id)
+        if (order.status != command.expectedStatus) throw OrderStatusConflictException(id)
 
         val previousStatus = order.status
         order.changeStatus(command.status)
-        if (!repository.updateStatus(order, command.expectedVersion)) throw OrderVersionConflictException(id)
-        events.publishEvent(OrderStatusChangedEvent(order.id, previousStatus, order.status, order.version))
+        if (!repository.updateStatus(order, command.expectedStatus)) throw OrderStatusConflictException(id)
+        events.publishEvent(OrderStatusChangedEvent(order.id, previousStatus, order.status))
 
         return order
     }

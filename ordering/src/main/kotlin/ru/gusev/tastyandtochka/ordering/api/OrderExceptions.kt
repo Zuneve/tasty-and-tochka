@@ -14,5 +14,5 @@ class OrderNotFoundException(val orderId: UUID) : RuntimeException("Order $order
 
 class OrderAmountTooLargeException : RuntimeException("Order amount exceeds the supported range")
 
-class OrderVersionConflictException(orderId: UUID) :
-    RuntimeException("Order $orderId has changed; reload it before retrying")
+class OrderStatusConflictException(orderId: UUID) :
+    RuntimeException("Order $orderId status has changed; reload it before retrying")

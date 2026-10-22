@@ -9,10 +9,9 @@ class Order private constructor(
     items: List<OrderItem>,
     val createdAt: Instant,
     status: OrderStatus,
-    version: Long,
 ) {
     constructor(id: UUID, items: List<OrderItem>, createdAt: Instant) :
-        this(id, items, createdAt, OrderStatus.CREATED, 0)
+        this(id, items, createdAt, OrderStatus.CREATED)
 
     // Copy and protect the list so callers cannot change an existing order's items.
     val items: List<OrderItem> = Collections.unmodifiableList(items.toList())
@@ -20,11 +19,7 @@ class Order private constructor(
     var status: OrderStatus = status
         private set
 
-    var version: Long = version
-        private set
-
     init {
-        require(version >= 0) { "Order version must not be negative" }
         require(this.items.isNotEmpty()) { "Order must contain at least one item" }
         require(this.items.map { it.productId }.distinct().size == this.items.size) {
             "Order must not contain duplicate products"
@@ -39,9 +34,7 @@ class Order private constructor(
         if (!status.canTransitionTo(newStatus)) {
             throw InvalidOrderStatusTransitionException(status, newStatus)
         }
-        val nextVersion = Math.incrementExact(version)
         status = newStatus
-        version = nextVersion
     }
 
     companion object {
@@ -50,7 +43,6 @@ class Order private constructor(
             items: List<OrderItem>,
             createdAt: Instant,
             status: OrderStatus,
-            version: Long,
-        ): Order = Order(id, items, createdAt, status, version)
+        ): Order = Order(id, items, createdAt, status)
     }
 }

@@ -16,15 +16,14 @@ internal class PostgresOrderRepository(private val jdbc: JdbcClient) : OrderRepo
     override fun save(order: Order) {
         jdbc.sql(
             """
-            INSERT INTO orders (id, status, total_price_in_kopecks, created_at, version)
-            VALUES (:id, :status, :total, :createdAt, :version)
+            INSERT INTO orders (id, status, total_price_in_kopecks, created_at)
+            VALUES (:id, :status, :total, :createdAt)
             """.trimIndent(),
         )
             .param("id", order.id)
             .param("status", order.status.name)
             .param("total", order.totalPriceInKopecks)
             .param("createdAt", order.createdAt.atOffset(ZoneOffset.UTC))
-            .param("version", order.version)
             .update()
 
         for (item in order.items) {
@@ -44,7 +43,7 @@ internal class PostgresOrderRepository(private val jdbc: JdbcClient) : OrderRepo
     }
 
     override fun findById(id: UUID): Order? {
-        val header = jdbc.sql("SELECT id, status, total_price_in_kopecks, created_at, version FROM orders WHERE id = :id")
+        val header = jdbc.sql("SELECT id, status, total_price_in_kopecks, created_at FROM orders WHERE id = :id")
             .param("id", id)
             .query { row, _ ->
                 OrderHeader(
@@ -52,7 +51,6 @@ internal class PostgresOrderRepository(private val jdbc: JdbcClient) : OrderRepo
                     status = OrderStatus.valueOf(row.getString("status")),
                     total = row.getLong("total_price_in_kopecks"),
                     createdAt = row.getObject("created_at", OffsetDateTime::class.java).toInstant(),
-                    version = row.getLong("version"),
                 )
             }
             .optional().orElse(null) ?: return null
@@ -74,20 +72,20 @@ internal class PostgresOrderRepository(private val jdbc: JdbcClient) : OrderRepo
             }
             .list()
 
-        val order = Order.restore(header.id, items, header.createdAt, header.status, header.version)
+        val order = Order.restore(header.id, items, header.createdAt, header.status)
         check(order.totalPriceInKopecks == header.total) { "Stored order total does not match its items" }
         return order
     }
 
-    override fun updateStatus(order: Order, expectedVersion: Long): Boolean = jdbc.sql(
+    override fun updateStatus(order: Order, expectedStatus: OrderStatus): Boolean = jdbc.sql(
         """
-        UPDATE orders SET status = :status, version = version + 1
-        WHERE id = :id AND version = :expectedVersion
+        UPDATE orders SET status = :status
+        WHERE id = :id AND status = :expectedStatus
         """.trimIndent(),
     )
         .param("status", order.status.name)
         .param("id", order.id)
-        .param("expectedVersion", expectedVersion)
+        .param("expectedStatus", expectedStatus.name)
         .update() == 1
 
     private data class OrderHeader(
@@ -95,6 +93,5 @@ internal class PostgresOrderRepository(private val jdbc: JdbcClient) : OrderRepo
         val status: OrderStatus,
         val total: Long,
         val createdAt: Instant,
-        val version: Long,
     )
 }
